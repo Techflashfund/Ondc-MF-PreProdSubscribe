@@ -152,19 +152,51 @@ def sign(signing_key: str, private_key_b64: str) -> str:
     return signature_b64
 
 
-def decrypt(enc_public_key_b64: str, enc_private_key_b64: str, cipherstring_b64: str) -> str:
-    private_key = serialization.load_der_private_key(
-        base64.b64decode(enc_private_key_b64),
-        password=None
-    )
-    public_key = serialization.load_der_public_key(
-        base64.b64decode(enc_public_key_b64)
-    )
+# def decrypt(enc_public_key_b64: str, enc_private_key_b64: str, cipherstring_b64: str) -> str:
+#     private_key = serialization.load_der_private_key(
+#         base64.b64decode(enc_private_key_b64),
+#         password=None
+#     )
+#     public_key = serialization.load_der_public_key(
+#         base64.b64decode(enc_public_key_b64)
+#     )
+#     shared_key = private_key.exchange(public_key)
+#     cipher = AES.new(shared_key, AES.MODE_ECB)
+#     ciphertxt = base64.b64decode(cipherstring_b64)
+#     plaintext = unpad(cipher.decrypt(ciphertxt), AES.block_size).decode('utf-8')
+#     return plaintext
+
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+def decrypt(enc_public_key_b64, enc_private_key_b64, cipher_b64):
+    # Load keys
+    private_key = serialization.load_der_private_key(base64.b64decode(enc_private_key_b64), password=None)
+    public_key = serialization.load_der_public_key(base64.b64decode(enc_public_key_b64))
+    
+    # Derive shared secret
     shared_key = private_key.exchange(public_key)
-    cipher = AES.new(shared_key, AES.MODE_ECB)
-    ciphertxt = base64.b64decode(cipherstring_b64)
-    plaintext = unpad(cipher.decrypt(ciphertxt), AES.block_size).decode('utf-8')
-    return plaintext
+    
+    # Derive AES key from shared secret using HKDF
+    aes_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'handshake data',
+    ).derive(shared_key)
+    
+    # Decode ciphertext
+    ciphertext = base64.b64decode(cipher_b64)
+    
+    # Extract nonce (usually first 12 bytes for AESGCM)
+    nonce = ciphertext[:12]
+    ct = ciphertext[12:]
+    
+    # Decrypt using AESGCM
+    aesgcm = AESGCM(aes_key)
+    plaintext = aesgcm.decrypt(nonce, ct, None)
+    return plaintext.decode('utf-8')
 
 
 logger = logging.getLogger(__name__)
