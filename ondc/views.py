@@ -33,23 +33,35 @@ import json
 import base64
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
+
 from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
+
 ONDC_PUBLIC_KEY_BASE64 = "MCowBQYDK2VuAyEAduMuZgmtpjdCuxv+Nc49K0cB6tL/Dj3HZetvVN7ZekM="
 
-def derive_aes_key(shared_secret):
+
+def derive_aes_key(shared_secret: bytes) -> bytes:
+    """
+    Derive a 256-bit AES key from the shared secret using HKDF-SHA256.
+    """
     return HKDF(
         algorithm=hashes.SHA256(),
         length=32,
         salt=None,
-        info=b''
+        info=b'ONDC Encryption',
     ).derive(shared_secret)
 
-def decrypt_challenge(encrypted_challenge, shared_key):
+
+def decrypt_challenge(encrypted_challenge: str, shared_key: bytes) -> str:
+    """
+    Decrypt the base64 encoded challenge using AES-CBC and PKCS7 unpadding.
+    Assumes IV is the first 16 bytes of the decoded ciphertext.
+    """
     decoded = base64.b64decode(encrypted_challenge)
     iv = decoded[:16]
     ciphertext = decoded[16:]
@@ -58,40 +70,51 @@ def decrypt_challenge(encrypted_challenge, shared_key):
     decrypted = cipher.decrypt(ciphertext)
     return unpad(decrypted, AES.block_size).decode('utf-8')
 
+
 @csrf_exempt
 def on_subscribe(request):
-    if request.method == "POST":
-        try:
-            data = json.loads(request.body)
-            encrypted_challenge = data.get("challenge")
+    if request.method != "POST":
+        return JsonResponse({"error": "Invalid request method"}, status=400)
 
-            if not encrypted_challenge:
-                return JsonResponse({"error": "Challenge not found"}, status=400)
+    try:
+        data = json.loads(request.body)
+        encrypted_challenge = data.get("challenge")
+        if not encrypted_challenge:
+            return JsonResponse({"error": "Challenge not found"}, status=400)
 
-            encryption_private_key_b64 = os.getenv("Encryption_Privatekey")
-            encryption_private_key = serialization.load_der_private_key(
-                base64.b64decode(encryption_private_key_b64),
-                password=None
-            )
+        # Load Encryption Private Key (X25519) from base64 DER
+        encryption_private_key_b64 = os.getenv("Encryption_Privatekey")
+        if not encryption_private_key_b64:
+            return JsonResponse({"error": "Encryption private key not configured"}, status=500)
 
-            # Load and convert ONDC public key to raw bytes
-            ondc_pub_der = base64.b64decode(ONDC_PUBLIC_KEY_BASE64)
-            ondc_pub_obj = serialization.load_der_public_key(ondc_pub_der)
-            ondc_pub_raw = ondc_pub_obj.public_bytes(
-                encoding=serialization.Encoding.Raw,
-                format=serialization.PublicFormat.Raw
-            )
-            ondc_public_key = X25519PublicKey.from_public_bytes(ondc_pub_raw)
+        encryption_private_key_der = base64.b64decode(encryption_private_key_b64)
+        encryption_private_key = serialization.load_der_private_key(
+            encryption_private_key_der,
+            password=None,
+        )
+        if not isinstance(encryption_private_key, X25519PrivateKey):
+            return JsonResponse({"error": "Encryption private key is not X25519"}, status=500)
 
-            # Derive shared key
-            shared_key = encryption_private_key.exchange(ondc_public_key)
+        # Load ONDC public key DER and convert to X25519PublicKey
+        ondc_pub_der = base64.b64decode(ONDC_PUBLIC_KEY_BASE64)
+        ondc_pub_obj = serialization.load_der_public_key(ondc_pub_der)
+        ondc_pub_raw = ondc_pub_obj.public_bytes(
+            encoding=serialization.Encoding.Raw,
+            format=serialization.PublicFormat.Raw,
+        )
+        ondc_public_key = X25519PublicKey.from_public_bytes(ondc_pub_raw)
 
-            # Decrypt challenge
-            decrypted_challenge = decrypt_challenge(encrypted_challenge, shared_key)
+        # Derive shared secret key using X25519 key exchange
+        shared_key = encryption_private_key.exchange(ondc_public_key)
 
-            return JsonResponse({"answer": decrypted_challenge})
+        # Decrypt challenge
+        decrypted_challenge = decrypt_challenge(encrypted_challenge, shared_key)
 
-        except Exception as e:
-            return JsonResponse({"error": str(e)}, status=500)
+        # Return decrypted challenge as 'answer'
+        return JsonResponse({"answer": decrypted_challenge})
 
-    return JsonResponse({"error": "Invalid request method"}, status=400)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return JsonResponse({"error": f"Exception: {str(e)}"}, status=500)
+
