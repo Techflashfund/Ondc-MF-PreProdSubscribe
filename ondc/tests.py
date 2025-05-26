@@ -1,26 +1,19 @@
+import base64
 import datetime
-from cryptic_utils import hash_message, create_signing_string, sign_response
-
-# Your raw request ID or any message
-request_id = "c72a9d06-d7a5-41e0-a890-4a6e72fe35cc"
+from nacl.signing import SigningKey
+from nacl.bindings import crypto_sign_ed25519_sk_to_seed
 
 # Provided values
-PRIVATE_KEY = "GBiAwaWGw6og3QVKgzemriesOhsBnmfKSb+gz+JWOPzlXhhiNXxwEHXrEHgnx6MH+zlOXG1dhEK8hNkHcebUjg=="
+PRIVATE_KEY_BASE64 = "GBiAwaWGw6og3QVKgzemriesOhsBnmfKSb+gz+JWOPzlXhhiNXxwEHXrEHgnx6MH+zlOXG1dhEK8hNkHcebUjg=="
+request_id = "c72a9d06-d7a5-41e0-a890-4a6e72fe35cc"
 
-# Step 1: Create timestamps
-created = int(datetime.datetime.now().timestamp())
-expires = int((datetime.datetime.now() + datetime.timedelta(hours=1)).timestamp())
+# Decode private key and generate signing key
+private_key_bytes = base64.b64decode(PRIVATE_KEY_BASE64)
+seed = crypto_sign_ed25519_sk_to_seed(private_key_bytes)
+signing_key = SigningKey(seed)
 
-# Step 2: Hash the request_id
-digest = hash_message(request_id)
+# Sign the plain request_id
+signed = signing_key.sign(request_id.encode("utf-8"))
+signature = base64.b64encode(signed.signature).decode("utf-8")
 
-# Step 3: Create signing string
-signing_string = create_signing_string(digest, created, expires)
-
-# Step 4: Sign it
-signature = sign_response(signing_string, PRIVATE_KEY)
-
-print("Created:", created)
-print("Expires:", expires)
-print("Signing String:\n", signing_string)
-print("Signature:\n", signature)
+print("Signature for HTML meta tag:\n", signature)
