@@ -16,7 +16,7 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path,include
-from ondc.views import ondc_site_verification
+# from ondc.views import ondc_site_verification
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('ondc.urls')),
