@@ -20,5 +20,5 @@ from ondc.views import ondc_site_verification
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('', include('ondc.urls')),
-    path('ondc-site-verification.html', ondc_site_verification, name='ondc_site_verification'),
+    # path('ondc-site-verification.html', ondc_site_verification, name='ondc_site_verification'),
 ]
