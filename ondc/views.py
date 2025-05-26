@@ -191,23 +191,22 @@ def on_subscribe(request):
     if request.method == "POST":
         try:
             data = json.loads(request.body)
-            logging.info(f"Received data: {data}")
             if not data or "challenge" not in data:
                 return JsonResponse({"error": "Missing 'challenge' in request body"}, status=400)
+
             encrypted_challenge = data.get("challenge")
 
-            # Load encryption private key (correct way)
+            # Load encryption private key (raw base64 X25519 format)
             encryption_private_key_base64 = os.getenv("Encryption_Privatekey")
+            if not encryption_private_key_base64:
+                raise ValueError("Encryption_Privatekey environment variable is missing.")
             encryption_private_key_bytes = base64.b64decode(encryption_private_key_base64)
 
-            private_key = serialization.load_der_private_key(
-                encryption_private_key_bytes,
-                password=None
-            )
+            private_key = x25519.X25519PrivateKey.from_private_bytes(encryption_private_key_bytes)
 
-            # Load ONDC public key
+            # Load ONDC public key (also X25519, base64-encoded)
             ondc_public_key_bytes = base64.b64decode(ONDC_PUBLIC_KEY_BASE64)
-            public_key = serialization.load_der_public_key(ondc_public_key_bytes)
+            public_key = x25519.X25519PublicKey.from_public_bytes(ondc_public_key_bytes)
 
             # Generate shared key
             shared_key = private_key.exchange(public_key)
@@ -218,6 +217,8 @@ def on_subscribe(request):
             return JsonResponse({"answer": decrypted_challenge})
 
         except Exception as e:
+            import traceback
+            traceback.print_exc()
             return JsonResponse({"error": str(e)}, status=500)
 
     return JsonResponse({"error": "Invalid request"}, status=400)
