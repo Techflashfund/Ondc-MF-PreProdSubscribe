@@ -169,71 +169,55 @@ def sign(signing_key: str, private_key_b64: str) -> str:
 #     plaintext = unpad(cipher.decrypt(ciphertxt), AES.block_size).decode('utf-8')
 #     return plaintext
 
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+import os
+import json
+import base64
+from django.http import JsonResponse, HttpResponse
+from django.views.decorators.csrf import csrf_exempt
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import x25519
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import unpad
 
-def decrypt(enc_public_key_b64, enc_private_key_b64, cipher_b64):
-    # Decode keys
-    private_key = serialization.load_der_private_key(base64.b64decode(enc_private_key_b64), password=None)
-    public_key = serialization.load_der_public_key(base64.b64decode(enc_public_key_b64))
+ONDC_PUBLIC_KEY_BASE64 = "MCowBQYDK2VuAyEAVFXINjXoWGPZ4zshbPwugbm9A932PjH3fey6D3nvOxk="
 
-    # Derive shared secret via ECDH (X25519)
-    shared_key = private_key.exchange(public_key)
-
-    # Derive AES key from shared secret using HKDF-SHA256
-    aes_key = HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=None,
-        info=b'handshake data'
-    ).derive(shared_key)
-
-    # Decode cipher and extract IV (first 16 bytes)
-    decoded = base64.b64decode(cipher_b64)
-    iv = decoded[:16]
-    ciphertext = decoded[16:]
-
-    # Decrypt using AES-CBC
-    cipher = Cipher(algorithms.AES(aes_key), modes.CBC(iv))
-    decryptor = cipher.decryptor()
-    padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
-
-    # Remove PKCS7 padding
-    pad_len = padded_plaintext[-1]
-    plaintext = padded_plaintext[:-pad_len]
-    
-    return plaintext.decode('utf-8')
-
-
-
-logger = logging.getLogger(__name__)
+def decrypt_challenge(encrypted_challenge, shared_key):
+    cipher = AES.new(shared_key, AES.MODE_ECB)
+    decrypted_bytes = cipher.decrypt(base64.b64decode(encrypted_challenge))
+    return unpad(decrypted_bytes, AES.block_size).decode('utf-8')
 
 @csrf_exempt
 def on_subscribe(request):
-    if request.method != 'POST':
-        return JsonResponse({"error": "Method not allowed"}, status=405)
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body)
+            encrypted_challenge = data.get("challenge")
 
-    try:
-        data = json.loads(request.body)
-    except Exception as e:
-        tb = traceback.format_exc()
-        logger.error(f"Invalid JSON: {e}\n{tb}")
-        return JsonResponse({"error": "Invalid JSON", "details": str(e)}, status=400)
+            # Load encryption private key (correct way)
+            encryption_private_key_base64 = os.getenv("Encryption_Privatekey")
+            encryption_private_key_bytes = base64.b64decode(encryption_private_key_base64)
 
-    challenge = data.get('challenge')
-    if not challenge:
-        logger.error("Challenge not found in request data")
-        return JsonResponse({"error": "Challenge not found"}, status=400)
+            private_key = serialization.load_der_private_key(
+                encryption_private_key_bytes,
+                password=None
+            )
 
-    try:
-        answer = decrypt(ONDC_PUBLIC_KEY, ENC_PRIVATE_KEY, challenge)
-    except Exception as e:
-        tb = traceback.format_exc()
-        logger.error(f"Decryption failed: {e}\n{tb}")
-        return JsonResponse({"error": f"Decryption failed: {str(e)}"}, status=400)
+            # Load ONDC public key
+            ondc_public_key_bytes = base64.b64decode(ONDC_PUBLIC_KEY_BASE64)
+            public_key = serialization.load_der_public_key(ondc_public_key_bytes)
 
-    return JsonResponse({"answer": answer})
+            # Generate shared key
+            shared_key = private_key.exchange(public_key)
+
+            # Decrypt the challenge
+            decrypted_challenge = decrypt_challenge(encrypted_challenge, shared_key)
+
+            return JsonResponse({"answer": decrypted_challenge})
+
+        except Exception as e:
+            return JsonResponse({"error": str(e)}, status=500)
+
+    return JsonResponse({"error": "Invalid request"}, status=400)
 
 def verify_html(request):
     signature = sign(REQUEST_ID, SIGNING_PRIVATE_KEY)
