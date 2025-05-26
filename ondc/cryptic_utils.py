@@ -13,7 +13,9 @@ from cryptography.hazmat.primitives import serialization
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
+from dotenv import load_dotenv
 
+load_dotenv()
 
 def load_request_body():
     path = os.getenv("REQUEST_BODY_PATH", "request_body_raw_text.txt")
@@ -65,25 +67,36 @@ def get_filter_dictionary_or_operation(filter_string):
     return {kv.split('=')[0].strip(): kv.split('=')[1].strip().replace("\"", "") for kv in filter_string_list}
 
 
+import os
+import time
+
 def create_authorisation_header(request_body=None, created=None, expires=None):
     request_body = request_body or load_request_body()
     if request_body is None:
         raise ValueError("Request body not found or invalid.")
     
+    # If created/expires not passed, create them here (e.g., now and now+1h)
+    created = created or int(time.time())
+    expires = expires or created + 3600  # expires 1 hour later
     
-
     signing_key = create_signing_string(hash_message(request_body), created, expires)
-    signature = sign_response(signing_key, private_key=os.getenv("PRIVATE_KEY"))
+    
+    # Use correct env variable for PRIVATE_KEY (Signing_private_key)
+    private_key = os.getenv("Signing_private_key") 
+    if not private_key:
+        raise ValueError("PRIVATE_KEY environment variable is not set.")
+    
+    signature = sign_response(signing_key, private_key=private_key)
 
     subscriber_id = os.getenv("SUBSCRIBER_ID", "buyer-app.ondc.org")
     unique_key_id = os.getenv("UNIQUE_KEY_ID", "207")
+    
     header = (
         f'Signature keyId="{subscriber_id}|{unique_key_id}|ed25519",'
         f'algorithm="ed25519",created="{created}",expires="{expires}",'
         f'headers="(created) (expires) digest",signature="{signature}"'
     )
     return header
-
 
 def verify_authorisation_header(auth_header, request_body_str=None, public_key=None):
     request_body_str = request_body_str or load_request_body()

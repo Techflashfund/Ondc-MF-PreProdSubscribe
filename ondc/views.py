@@ -132,6 +132,9 @@ import json
 import os
 import traceback
 import logging
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # You can load these from environment variables or settings
 REQUEST_ID =  "c72a9d06-d7a5-41e0-a890-4a6e72fe35cc" 
