@@ -130,6 +130,8 @@ from django.http import JsonResponse, HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 import json
 import os
+import traceback
+import logging
 
 # You can load these from environment variables or settings
 REQUEST_ID =  "c72a9d06-d7a5-41e0-a890-4a6e72fe35cc" 
@@ -165,27 +167,33 @@ def decrypt(enc_public_key_b64: str, enc_private_key_b64: str, cipherstring_b64:
     return plaintext
 
 
+logger = logging.getLogger(__name__)
+
 @csrf_exempt
 def on_subscribe(request):
     if request.method != 'POST':
         return JsonResponse({"error": "Method not allowed"}, status=405)
 
-    # try:
-    data = json.loads(request.body)
-    # except Exception:
-    #     return JsonResponse({"error": "Invalid JSON"}, status=400)
+    try:
+        data = json.loads(request.body)
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"Invalid JSON: {e}\n{tb}")
+        return JsonResponse({"error": "Invalid JSON", "details": str(e)}, status=400)
 
     challenge = data.get('challenge')
     if not challenge:
+        logger.error("Challenge not found in request data")
         return JsonResponse({"error": "Challenge not found"}, status=400)
 
-    # try:
-    answer = decrypt(ONDC_PUBLIC_KEY, ENC_PRIVATE_KEY, challenge)
-    # except Exception as e:
-    #     return JsonResponse({"error": f"Decryption failed: {str(e)}"}, status=400)
+    try:
+        answer = decrypt(ONDC_PUBLIC_KEY, ENC_PRIVATE_KEY, challenge)
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"Decryption failed: {e}\n{tb}")
+        return JsonResponse({"error": f"Decryption failed: {str(e)}"}, status=400)
 
     return JsonResponse({"answer": answer})
-
 
 def verify_html(request):
     signature = sign(REQUEST_ID, SIGNING_PRIVATE_KEY)
