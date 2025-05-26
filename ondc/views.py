@@ -169,59 +169,90 @@ def sign(signing_key: str, private_key_b64: str) -> str:
 #     plaintext = unpad(cipher.decrypt(ciphertxt), AES.block_size).decode('utf-8')
 #     return plaintext
 
-import os
 import json
 import base64
-from django.http import JsonResponse, HttpResponse
+import logging
+import traceback
+
+from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import x25519
-from Crypto.Cipher import AES
-from Crypto.Util.Padding import unpad
 
-ONDC_PUBLIC_KEY_BASE64 = "MCowBQYDK2VuAyEAVFXINjXoWGPZ4zshbPwugbm9A932PjH3fey6D3nvOxk="
+from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.backends import default_backend
 
-def decrypt_challenge(encrypted_challenge, shared_key):
-    cipher = AES.new(shared_key, AES.MODE_ECB)
-    decrypted_bytes = cipher.decrypt(base64.b64decode(encrypted_challenge))
-    return unpad(decrypted_bytes, AES.block_size).decode('utf-8')
+logger = logging.getLogger(__name__)
+
+# Replace with your actual keys (base64 encoded DER format)
+ENC_PRIVATE_KEY_B64 = os.getenv("Encryption_Privatekey")
+ONDC_PUBLIC_KEY_B64 = os.getenv("ONDC_PUBLIC_KEY")  # Pre-prod key
+
+def decrypt_challenge(enc_public_key_b64, enc_private_key_b64, cipher_b64):
+    # Load your private key (X25519)
+    private_key = serialization.load_der_private_key(
+        base64.b64decode(enc_private_key_b64),
+        password=None,
+        backend=default_backend()
+    )
+
+    # Load ONDC public key (X25519)
+    public_key = serialization.load_der_public_key(
+        base64.b64decode(enc_public_key_b64),
+        backend=default_backend()
+    )
+
+    # Derive shared key (ECDH)
+    shared_key = private_key.exchange(public_key)
+
+    # Derive AES key (32 bytes) using HKDF
+    aes_key = HKDF(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=None,
+        info=b'handshake data',
+        backend=default_backend()
+    ).derive(shared_key)
+
+    # Decode the base64 cipher
+    decoded = base64.b64decode(cipher_b64)
+    iv = decoded[:16]
+    ciphertext = decoded[16:]
+
+    # Decrypt using AES-CBC
+    cipher = Cipher(algorithms.AES(aes_key), modes.CBC(iv), backend=default_backend())
+    decryptor = cipher.decryptor()
+    padded_plaintext = decryptor.update(ciphertext) + decryptor.finalize()
+
+    # Remove PKCS7 padding
+    pad_len = padded_plaintext[-1]
+    plaintext = padded_plaintext[:-pad_len]
+
+    return plaintext.decode('utf-8')
 
 @csrf_exempt
 def on_subscribe(request):
-    if request.method == "POST":
-        try:
-            data = json.loads(request.body)
-            if not data or "challenge" not in data:
-                return JsonResponse({"error": "Missing 'challenge' in request body"}, status=400)
+    if request.method != 'POST':
+        return JsonResponse({"error": "Method not allowed"}, status=405)
 
-            encrypted_challenge = data.get("challenge")
+    try:
+        data = json.loads(request.body)
+    except Exception as e:
+        logger.error(f"Invalid JSON: {e}")
+        return JsonResponse({"error": "Invalid JSON", "details": str(e)}, status=400)
 
-            # Load encryption private key (raw base64 X25519 format)
-            encryption_private_key_base64 = os.getenv("Encryption_Privatekey")
-            if not encryption_private_key_base64:
-                raise ValueError("Encryption_Privatekey environment variable is missing.")
-            encryption_private_key_bytes = base64.b64decode(encryption_private_key_base64)
+    challenge = data.get('challenge')
+    if not challenge:
+        return JsonResponse({"error": "Missing challenge string"}, status=400)
 
-            private_key = x25519.X25519PrivateKey.from_private_bytes(encryption_private_key_bytes)
+    try:
+        answer = decrypt_challenge(ONDC_PUBLIC_KEY_B64, ENC_PRIVATE_KEY_B64, challenge)
+    except Exception as e:
+        tb = traceback.format_exc()
+        logger.error(f"Decryption failed: {e}\n{tb}")
+        return JsonResponse({"error": f"Decryption failed: {str(e)}"}, status=400)
 
-            # Load ONDC public key (also X25519, base64-encoded)
-            ondc_public_key_bytes = base64.b64decode(ONDC_PUBLIC_KEY_BASE64)
-            public_key = x25519.X25519PublicKey.from_public_bytes(ondc_public_key_bytes)
-
-            # Generate shared key
-            shared_key = private_key.exchange(public_key)
-
-            # Decrypt the challenge
-            decrypted_challenge = decrypt_challenge(encrypted_challenge, shared_key)
-
-            return JsonResponse({"answer": decrypted_challenge})
-
-        except Exception as e:
-            import traceback
-            traceback.print_exc()
-            return JsonResponse({"error": str(e)}, status=500)
-
-    return JsonResponse({"error": "Invalid request"}, status=400)
+    return JsonResponse({"answer": answer})
 
 def verify_html(request):
     signature = sign(REQUEST_ID, SIGNING_PRIVATE_KEY)
