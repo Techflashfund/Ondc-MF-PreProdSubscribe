@@ -191,6 +191,9 @@ def on_subscribe(request):
     if request.method == "POST":
         try:
             data = json.loads(request.body)
+            logging.info(f"Received data: {data}")
+            if not data or "challenge" not in data:
+                return JsonResponse({"error": "Missing 'challenge' in request body"}, status=400)
             encrypted_challenge = data.get("challenge")
 
             # Load encryption private key (correct way)
