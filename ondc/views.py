@@ -28,30 +28,31 @@ def ondc_site_verification(request):
     """, content_type="text/html")
 
 
-import base64
-import json
 import os
-from django.views.decorators.csrf import csrf_exempt
+import json
+import base64
 from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+from cryptography.hazmat.primitives import serialization, hashes
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
-from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PrivateKey, X25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.x25519 import X25519PublicKey
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
+ONDC_PUBLIC_KEY_BASE64 = "MCowBQYDK2VuAyEAduMuZgmtpjdCuxv+Nc49K0cB6tL/Dj3HZetvVN7ZekM="
+
 def derive_aes_key(shared_secret):
-    hkdf = HKDF(
+    return HKDF(
         algorithm=hashes.SHA256(),
         length=32,
         salt=None,
-        info=b'',
-    )
-    return hkdf.derive(shared_secret)
+        info=b''
+    ).derive(shared_secret)
 
 def decrypt_challenge(encrypted_challenge, shared_key):
-    decoded_data = base64.b64decode(encrypted_challenge)
-    iv = decoded_data[:16]
-    ciphertext = decoded_data[16:]
+    decoded = base64.b64decode(encrypted_challenge)
+    iv = decoded[:16]
+    ciphertext = decoded[16:]
     aes_key = derive_aes_key(shared_key)
     cipher = AES.new(aes_key, AES.MODE_CBC, iv)
     decrypted = cipher.decrypt(ciphertext)
@@ -63,31 +64,29 @@ def on_subscribe(request):
         try:
             data = json.loads(request.body)
             encrypted_challenge = data.get("challenge")
+
             if not encrypted_challenge:
                 return JsonResponse({"error": "Challenge not found"}, status=400)
 
-            # Load private key from DER base64 env var
-            encryption_private_key_base64 = os.getenv("Encryption_Privatekey")
-            encryption_private_key_bytes = base64.b64decode(encryption_private_key_base64)
-            private_key = serialization.load_der_private_key(
-                encryption_private_key_bytes,
+            encryption_private_key_b64 = os.getenv("Encryption_Privatekey")
+            encryption_private_key = serialization.load_der_private_key(
+                base64.b64decode(encryption_private_key_b64),
                 password=None
             )
 
-            # Load public key from DER base64 constant
-            ondc_public_key_base64 = "MCowBQYDK2VuAyEAduMuZgmtpjdCuxv+Nc49K0cB6tL/Dj3HZetvVN7ZekM="
-            ondc_public_key_bytes = base64.b64decode(ondc_public_key_base64)
-            public_key_obj = serialization.load_der_public_key(ondc_public_key_bytes)
-
-            public_bytes_raw = public_key_obj.public_bytes(
+            # Load and convert ONDC public key to raw bytes
+            ondc_pub_der = base64.b64decode(ONDC_PUBLIC_KEY_BASE64)
+            ondc_pub_obj = serialization.load_der_public_key(ondc_pub_der)
+            ondc_pub_raw = ondc_pub_obj.public_bytes(
                 encoding=serialization.Encoding.Raw,
                 format=serialization.PublicFormat.Raw
             )
-            public_key = X25519PublicKey.from_public_bytes(public_bytes_raw)
+            ondc_public_key = X25519PublicKey.from_public_bytes(ondc_pub_raw)
 
-            # Exchange shared key
-            shared_key = private_key.exchange(public_key)
+            # Derive shared key
+            shared_key = encryption_private_key.exchange(ondc_public_key)
 
+            # Decrypt challenge
             decrypted_challenge = decrypt_challenge(encrypted_challenge, shared_key)
 
             return JsonResponse({"answer": decrypted_challenge})
@@ -95,4 +94,4 @@ def on_subscribe(request):
         except Exception as e:
             return JsonResponse({"error": str(e)}, status=500)
 
-    return JsonResponse({"error": "Invalid request"}, status=400)
+    return JsonResponse({"error": "Invalid request method"}, status=400)
