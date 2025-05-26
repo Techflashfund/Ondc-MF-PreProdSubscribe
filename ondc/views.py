@@ -58,17 +58,17 @@ def derive_aes_key(shared_secret: bytes) -> bytes:
 
 
 def decrypt_challenge(encrypted_challenge: str, shared_key: bytes) -> str:
-    """
-    Decrypt the base64 encoded challenge using AES-CBC and PKCS7 unpadding.
-    Assumes IV is the first 16 bytes of the decoded ciphertext.
-    """
     decoded = base64.b64decode(encrypted_challenge)
-    iv = decoded[:16]
-    ciphertext = decoded[16:]
+    iv = decoded[:12]
+    tag = decoded[-16:]
+    ciphertext = decoded[12:-16]
+
     aes_key = derive_aes_key(shared_key)
-    cipher = AES.new(aes_key, AES.MODE_CBC, iv)
-    decrypted = cipher.decrypt(ciphertext)
-    return unpad(decrypted, AES.block_size).decode('utf-8')
+
+    cipher = AES.new(aes_key, AES.MODE_GCM, nonce=iv)
+    decrypted = cipher.decrypt_and_verify(ciphertext, tag)
+
+    return decrypted.decode('utf-8')
 
 
 @csrf_exempt
