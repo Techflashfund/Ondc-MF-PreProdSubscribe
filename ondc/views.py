@@ -16,16 +16,18 @@ ENCRYPTION_PRIVATE_KEY_BASE64 = os.environ.get("Encryption_Privatekey")
 ONDC_PUBLIC_KEY_BASE64="MCowBQYDK2VuAyEAa9Wbpvd9SsrpOZFcynyt/TO3x0Yrqyys4NUGIvyxX2Q="
 
 def ondc_site_verification(request):
-    return HttpResponse(f"""
-    <html>
-        <head>
-            <meta name='ondc-site-verification' content='isk12DbSMBYmeCM+9u0MqQpNKdsNGujBN7PRTeclWkT5DEZYG8oY1J6oI/zP1vr91wOhDjpw1bu+uCmm5HWEAA==' />
-        </head>
-        <body>
-            ONDC Site Verification Page
-        </body>
-    </html>
-    """, content_type="text/html")
+    # return HttpResponse(f"""
+    # <html>
+    #     <head>
+    #         <meta name='ondc-site-verification' content='isk12DbSMBYmeCM+9u0MqQpNKdsNGujBN7PRTeclWkT5DEZYG8oY1J6oI/zP1vr91wOhDjpw1bu+uCmm5HWEAA==' />
+    #     </head>
+    #     <body>
+    #         ONDC Site Verification Page
+    #     </body>
+    # </html>
+    # """, content_type="text/html")
+    token = "isk12DbSMBYmeCM+9u0MqQpNKdsNGujBN7PRTeclWkT5DEZYG8oY1J6oI/zP1vr91wOhDjpw1bu+uCmm5HWEAA=="
+    return HttpResponse(token, content_type="text/plain")
 
 
 import os
