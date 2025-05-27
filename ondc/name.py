@@ -7,6 +7,8 @@ from nacl.signing import SigningKey
 import os
 from nacl.bindings import crypto_sign_ed25519_sk_to_seed
 from dotenv import load_dotenv
+from cryptic_utils import *
+import datetime
 
 load_dotenv()
 
@@ -21,10 +23,10 @@ print(SUBSCRIBER_ID, UNIQUE_KEY_ID, SIGNING_PUBLIC_KEY, ENCRYPTION_PUBLIC_KEY)
 
 # Helper functions
 def get_timestamp():
-    return datetime.utcnow().isoformat(timespec='milliseconds') + "Z"
+    return datetime.datetime.utcnow().isoformat(timespec='milliseconds') + "Z"
 
 def get_valid_until():
-    return (datetime.utcnow() + timedelta(days=365)).isoformat(timespec='milliseconds') + "Z"
+    return (datetime.datetime.utcnow()  + datetime.timedelta(days=365)).isoformat(timespec='milliseconds') + "Z"
 
 def generate_signature(message: str, private_key_base64: str):
     private_key_bytes = base64.b64decode(private_key_base64)
@@ -34,19 +36,33 @@ def generate_signature(message: str, private_key_base64: str):
     signature = base64.b64encode(signed.signature).decode('utf-8')
     return signature
 
-def create_authorization_header(body, subscriber_id, unique_key_id, private_key_base64):
-    created = int(datetime.now(UTC).timestamp())
-    expires = created + 3600  # valid for 1 hour
+# def create_authorisation_header(request_body=None, created=None, expires=None):
+#     request_body = request_body 
+#     if request_body is None:
+#         raise ValueError("Request body not found or invalid.")
+    
+#     if created is None:
+#         created = int(datetime.datetime.now().timestamp()) - 1000
 
-    digest = base64.b64encode(body.encode()).decode()
-    signing_string = f"(created): {created}\n(expires): {expires}\ndigest: BLAKE-512={digest}"
-    signature = generate_signature(signing_string, private_key_base64)
+#     if expires is None:
+#         expires = int((datetime.datetime.now() + datetime.timedelta(minutes=10)).timestamp())
 
-    return (
-        f'Signature keyId="{subscriber_id}|{unique_key_id}|ed25519",'
-        f'algorithm="ed25519",created="{created}",expires="{expires}",'
-        f'headers="(created) (expires) digest",signature="{signature}"'
-    )
+    
+    
+
+#     signing_key = create_signing_string(hash_message(request_body), created, expires)
+#     print("Signing Key:", signing_key)  # For debugging
+#     signature = sign_response(signing_key, private_key=os.getenv("Signing_private_key"))
+
+#     subscriber_id = os.getenv("SUBSCRIBER_ID", "buyer-app.ondc.org")
+#     unique_key_id = os.getenv("UNIQUE_KEY_ID", "207")
+#     header = (
+#         f'Signature keyId="{subscriber_id}|{unique_key_id}|ed25519",'
+#         f'algorithm="ed25519",created="{created}",expires="{expires}",'
+#         f'headers="(created) (expires) digest",signature="{signature}"'
+#     )
+#     return header
+
 
 # Prepare dynamic fields
 request_id = "c72a9d06-d7a5-41e0-a890-4a6e72fe35cc"
@@ -105,12 +121,15 @@ payload = {
 
 # Convert to JSON and sign
 json_payload = json.dumps(payload, separators=(',', ':'))
-authorization_header = create_authorization_header(json_payload, SUBSCRIBER_ID, UNIQUE_KEY_ID, SIGNING_PRIVATE_KEY_BASE64)
+authorization_header =  create_authorisation_header(json_payload, SUBSCRIBER_ID, UNIQUE_KEY_ID, SIGNING_PRIVATE_KEY_BASE64)
 
 headers = {
-    "Content-Type": "application/json",
-    "Authorization": authorization_header
-}
+            "Content-Type": "application/json",
+            "Authorization": authorization_header,
+            "X-Gateway-Authorization": os.getenv("SIGNED_UNIQUE_REQ_ID", ""),
+            "X-Gateway-Subscriber-Id": os.getenv("SUBSCRIBER_ID")
+        }
+
 
 # Make the request
 response = requests.post(

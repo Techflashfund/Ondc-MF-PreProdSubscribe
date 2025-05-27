@@ -91,13 +91,13 @@ from cryptography.hazmat.primitives import serialization
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import unpad
 
-# Your config - replace these with your real keys or environment variables
+# Your config - replace with your real keys or env variables
 REQUEST_ID = "c72a9d06-d7a5-41e0-a890-4a6e72fe35cc"
 SIGNING_PUBLIC_KEY = "5V4YYjV8cBB16xB4J8ejB/s5TlxtXYRCvITZB3Hm1I4="
 SIGNING_PRIVATE_KEY = "GBiAwaWGw6og3QVKgzemriesOhsBnmfKSb+gz+JWOPzlXhhiNXxwEHXrEHgnx6MH+zlOXG1dhEK8hNkHcebUjg=="
 ONDC_PUBLIC_KEY = "MCowBQYDK2VuAyEAduMuZgmtpjdCuxv+Nc49K0cB6tL/Dj3HZetvVN7ZekM="
-ENC_PUBLIC_KEY = "MCowBQYDK2VuAyEAVFXINjXoWGPZ4zshbPwugbm9A932PjH3fey6D3nvOxk="
-ENC_PRIVATE_KEY = "MC4CAQAwBQYDK2VuBCIEIAhsMay0cwBEUSdFanNlJ3NlF88YiAUULJ60ueK6wide"
+ENC_PUBLIC_KEY = "MCowBQYDK2VuAyEAVFXINjXoWGPZ4zshbPwugbm9A932PjH3fey6D3nvOxk="  # Sender's public key
+ENC_PRIVATE_KEY = "MC4CAQAwBQYDK2VuBCIEIAhsMay0cwBEUSdFanNlJ3NlF88YiAUULJ60ueK6wide"  # Your private key
 
 
 def sign(signing_key, private_key):
@@ -109,34 +109,48 @@ def sign(signing_key, private_key):
     return signature
 
 
-def decrypt(enc_public_key, enc_private_key, cipherstring):
+def decrypt(private_key_b64, peer_public_key_b64, cipherstring):
+    """
+    Decrypts a cipherstring using X25519 keys:
+    - private_key_b64: your own private key (base64 DER)
+    - peer_public_key_b64: sender's public key (base64 DER)
+    """
     private_key = serialization.load_der_private_key(
-        base64.b64decode(enc_private_key),
+        base64.b64decode(private_key_b64),
         password=None
     )
     public_key = serialization.load_der_public_key(
-        base64.b64decode(enc_public_key)
+        base64.b64decode(peer_public_key_b64)
     )
     shared_key = private_key.exchange(public_key)
+
     cipher = AES.new(shared_key, AES.MODE_ECB)
     ciphertxt = base64.b64decode(cipherstring)
-    return unpad(cipher.decrypt(ciphertxt), AES.block_size).decode('utf-8')
+
+    # This will raise ValueError if padding is incorrect
+    plaintext = unpad(cipher.decrypt(ciphertxt), AES.block_size).decode('utf-8')
+    return plaintext
 
 
 @csrf_exempt
 def on_subscribe(request):
     if request.method != "POST":
         return HttpResponseBadRequest("Only POST allowed")
+
     try:
         data = json.loads(request.body)
     except Exception as e:
         return JsonResponse({"error": f"Invalid JSON: {str(e)}"}, status=400)
-    
-    # Debug print/log the incoming request JSON
+
     print(f"/on_subscribe called :: Request -> {data}")
 
     try:
-        decrypted_answer = decrypt(ONDC_PUBLIC_KEY, ENC_PRIVATE_KEY, data['challenge'])
+        # Note the order: your private key first, sender's public key second
+        decrypted_answer = decrypt(
+            private_key_b64=ENC_PRIVATE_KEY,
+            peer_public_key_b64=ENC_PUBLIC_KEY,
+            cipherstring=data['challenge']
+        )
     except Exception as e:
         traceback_str = traceback.format_exc()
         print("Exception in decrypt:\n", traceback_str)
