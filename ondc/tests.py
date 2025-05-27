@@ -24,7 +24,7 @@ from nacl.signing import SigningKey
 from nacl.bindings import crypto_sign_ed25519_sk_to_seed
 
 # Base64 encoded full private key (private+public)
-private_key_base64 = "XqDH+WrscKFZY7YfWU+B/JY3fyC3JFqvtwITfVAJvlOHNyJJVvQSWyP3dR+nt7CMTljYu5F9TfyBS6zm4mhazw=="
+private_key_base64 = "GBiAwaWGw6og3QVKgzemriesOhsBnmfKSb+gz+JWOPzlXhhiNXxwEHXrEHgnx6MH+zlOXG1dhEK8hNkHcebUjg=="
 
 # The request_id you will use in payload
 request_id ="c72a9d06-d7a5-41e0-a890-4a6e72fe35cc" 
