@@ -1,8 +1,6 @@
 from django.urls import path
-from . import views
+from .views import ondc_site_verification, on_subscribe
 
 urlpatterns = [
-    path('on_subscribe', views.on_subscribe, name='on_subscribe'),
-    path('ondc-site-verification.html', views.verify_html, name='verify_html'),
-    path('', views.health_check, name='health_check'),   
+    path('on_subscribe', on_subscribe, name='on_subscribe')    
 ]
