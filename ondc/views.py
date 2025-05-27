@@ -82,6 +82,7 @@ def ondc_site_verification(request):
 
 import base64
 import json
+import traceback
 from django.http import JsonResponse, HttpResponseBadRequest
 from django.views.decorators.csrf import csrf_exempt
 from nacl.bindings import crypto_sign_ed25519_sk_to_seed
@@ -137,6 +138,8 @@ def on_subscribe(request):
     try:
         decrypted_answer = decrypt(ONDC_PUBLIC_KEY, ENC_PRIVATE_KEY, data['challenge'])
     except Exception as e:
+        traceback_str = traceback.format_exc()
+        print("Exception in decrypt:\n", traceback_str)
         return JsonResponse({"error": f"Decryption failed: {str(e)}"}, status=500)
 
     return JsonResponse({"answer": decrypted_answer})
